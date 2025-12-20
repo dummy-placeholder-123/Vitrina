@@ -1,0 +1,45 @@
+name: Deploy to ECS
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+        - 'vitrina-mp/**' 
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/custom-gh-cicd-role
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Login to ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push image
+        run: |
+          REGISTRY='${{ steps.login-ecr.outputs.registry }}'
+          REPOSITORY='${{ vars.ECR_REPOSITORY }}'
+          IMAGE="$REGISTRY/$REPOSITORY:${{ github.sha }}"
+
+          docker build -t "$IMAGE" -f vitrina-mp/Dockerfile vitrina-mp
+          docker push "$IMAGE"
+          echo "IMAGE_URI=$IMAGE" >> "$GITHUB_ENV"
+
+      # - name: Deploy to ECS
+      #   run: |
+      #     aws ecs update-service \
+      #       --cluster ${{ vars.ECS_CLUSTER }} \
+      #       --service ${{ vars.ECS_SERVICE }} \
+      #       --force-new-deployment

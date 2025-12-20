@@ -1,0 +1,13 @@
+.git
+.github
+.idea
+.vscode
+.DS_Store
+
+target
+**/target
+
+*.iml
+
+README.md
+HELP.md
