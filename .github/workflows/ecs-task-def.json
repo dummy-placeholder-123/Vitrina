@@ -1,0 +1,47 @@
+{
+  "family": "vitrina-mp-task-def",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "1024",
+  "memory": "2048",
+  "runtimePlatform": {
+    "cpuArchitecture": "X86_64",
+    "operatingSystemFamily": "LINUX"
+  },
+  "executionRoleArn": "arn:aws:iam::289956717103:role/ecsTaskExecutionRole",
+  "containerDefinitions": [
+    {
+      "name": "alpha-vitrina-mp",
+      "image": "REPLACE_ME",
+      "essential": true,
+      "cpu": 0,
+      "portMappings": [
+        {
+          "name": "alpha-vitrina-mp-80-tcp",
+          "containerPort": 8000,
+          "hostPort": 8000,
+          "protocol": "tcp",
+          "appProtocol": "http"
+        }
+      ],
+      "environment": [],
+      "environmentFiles": [],
+      "mountPoints": [],
+      "systemControls": [],
+      "ulimits": [],
+      "volumesFrom": [],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/vitrina-mp-task-def",
+          "awslogs-create-group": "true",
+          "awslogs-region": "us-east-1",
+          "awslogs-stream-prefix": "ecs"
+        },
+        "secretOptions": []
+      }
+    }
+  ],
+  "volumes": [],
+  "placementConstraints": []
+}
