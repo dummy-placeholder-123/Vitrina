@@ -1,12 +1,7 @@
-name: Deploy Dev to ECS
+name: Deploy Prod to ECS
 
 on:
   workflow_dispatch:
-  push:
-    branches: [ main ]
-    paths:
-        - 'vitrina-mp/**' 
-        - '.github/**'
 permissions:
   id-token: write
   contents: read
@@ -14,6 +9,7 @@ permissions:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    environment: prod
 
     steps:
       - name: Checkout
@@ -29,19 +25,15 @@ jobs:
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
 
-      - name: Build and push image
+      - name: Use staged-tag image
         run: |
           REGISTRY='${{ steps.login-ecr.outputs.registry }}'
           REPOSITORY='${{ vars.ECR_REPOSITORY }}'
-          TAG='${{ github.sha }}'
-          IMAGE="$REGISTRY/$REPOSITORY:$TAG"
-
-          docker build -t "$IMAGE" -f vitrina-mp/Dockerfile vitrina-mp
-          docker push "$IMAGE"
+          STAGED_TAG='staged-tag'
 
           DIGEST="$(aws ecr describe-images \
             --repository-name "$REPOSITORY" \
-            --image-ids imageTag="$TAG" \
+            --image-ids imageTag="$STAGED_TAG" \
             --query 'imageDetails[0].imageDigest' \
             --output text)"
           echo "IMAGE_URI=$REGISTRY/$REPOSITORY@$DIGEST" >> "$GITHUB_ENV"
