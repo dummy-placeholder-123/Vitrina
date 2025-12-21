@@ -1,10 +1,12 @@
 name: Deploy to ECS
 
 on:
+  workflow_dispatch:
   push:
     branches: [ main ]
     paths:
         - 'vitrina-mp/**' 
+        - '.github/**'
 permissions:
   id-token: write
   contents: read
