@@ -14,10 +14,10 @@ public class Deal {
 
     private String dealName;
 
-    @ManyToOne
+    @ManyToOne(fetch = FetchType.LAZY)
     private Customer createdBy;
 
-    @OneToOne
+    @OneToOne(fetch = FetchType.LAZY)
     private Chat chat;
 
     public Deal() {

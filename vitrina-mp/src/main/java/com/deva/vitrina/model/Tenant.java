@@ -13,7 +13,10 @@ public class Tenant {
     private UUID uuid;
 
     private String tenantName;
-
+    
+    public UUID getUuid() {
+        return uuid;
+    }
     public Tenant() {
     }
 }
