@@ -6,21 +6,13 @@ on:
     paths:
       - 'vitrina-mp/**'
       - '.github/**'
-  workflow_dispatch:
-    inputs:
-      target:
-        description: "Deploy target"
-        type: choice
-        options:
-          - stage
-          - prod
-        default: stage
+      
 permissions:
   id-token: write
   contents: read
 
 jobs:
-  dev:
+  dev:₹
     name: Deploy Dev
     runs-on: ubuntu-latest
     if: ${{ github.event_name == 'push' }}

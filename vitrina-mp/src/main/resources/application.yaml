@@ -1,6 +1,33 @@
 spring:
   application:
     name: vitrina
+# DB stuff
+  datasource:
+    url: jdbc:postgresql://localhost:5432/vitrina
+    username: devashishrane
+    password: devashishrane
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      pool-name: vitrina-pool
+      maximum-pool-size: 10
+      minimum-idle: 2
+      idle-timeout: 30000
+      connection-timeout: 20000
+      max-lifetime: 1800000
+      leak-detection-threshold: 5000
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        format_sql: true
+        jdbc.time_zone: UTC
+  flyway:
+    enabled: true
+    baseline-on-migrate: true
+
 server:
   port: 8000
 
@@ -16,3 +43,13 @@ management:
     health:
       probes:
         enabled: true
+
+
+# logging
+logging:
+  level:
+    org.hibernate.SQL: DEBUG
+    org.hibernate.orm.jdbc.bind: TRACE
+    org.hibernate.tool.schema: DEBUG
+    org.springframework.transaction: TRACE
+    com.zaxxer.hikari: DEBUG
