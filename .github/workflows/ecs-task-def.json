@@ -1,7 +1,9 @@
 {
   "family": "vitrina-mp-task-def",
   "networkMode": "awsvpc",
-  "requiresCompatibilities": ["FARGATE"],
+  "requiresCompatibilities": [
+    "FARGATE"
+  ],
   "cpu": "1024",
   "memory": "2048",
   "runtimePlatform": {
@@ -24,7 +26,24 @@
           "appProtocol": "http"
         }
       ],
-      "environment": [],
+      "environment": [
+        {
+          "name": "SPRING_PROFILES_ACTIVE",
+          "value": "prod"
+        },
+        {
+          "name": "DB_HOST",
+          "value": "vitrina-prod.ckb20k4wmdgc.us-east-1.rds.amazonaws.com"
+        },
+        {
+          "name": "DB_PORT",
+          "value": "5432"
+        },
+        {
+          "name": "DB_NAME",
+          "value": "vitrina-prod"
+        }
+      ],
       "environmentFiles": [],
       "mountPoints": [],
       "systemControls": [],
@@ -39,7 +58,17 @@
           "awslogs-stream-prefix": "ecs"
         },
         "secretOptions": []
-      }
+      },
+      "secrets": [
+        {
+          "name": "DB_USERNAME",
+          "valueFrom": "arn:aws:secretsmanager:us-east-1:289956717103:secret:rds!db-92458258-0d92-48ff-812b-e991e9fdcaaa-SUaHuK:username::"
+        },
+        {
+          "name": "DB_PASSWORD",
+          "valueFrom": "arn:aws:secretsmanager:us-east-1:289956717103:secret:rds!db-92458258-0d92-48ff-812b-e991e9fdcaaa-SUaHuK:password::"
+        }
+      ]
     }
   ],
   "volumes": [],

@@ -1,11 +1,9 @@
 spring:
   application:
     name: vitrina
-# DB stuff
+  profiles:
+    default: dev
   datasource:
-    url: jdbc:postgresql://localhost:5432/vitrina
-    username: devashishrane
-    password: devashishrane
     driver-class-name: org.postgresql.Driver
     hikari:
       pool-name: vitrina-pool
@@ -43,7 +41,6 @@ management:
     health:
       probes:
         enabled: true
-
 
 # logging
 logging:
