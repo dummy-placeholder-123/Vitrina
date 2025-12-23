@@ -12,7 +12,7 @@ permissions:
   contents: read
 
 jobs:
-  dev:₹
+  dev:
     name: Deploy Dev
     runs-on: ubuntu-latest
     if: ${{ github.event_name == 'push' }}
