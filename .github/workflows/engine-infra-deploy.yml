@@ -39,7 +39,7 @@ jobs:
         uses: aws-actions/configure-aws-credentials@v4
         with:
           # Use GitHub OIDC to assume the deploy role.
-          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          role-to-assume: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/custom-gh-cicd-role
           aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
 
       - name: Preflight bootstrap check
