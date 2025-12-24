@@ -5,6 +5,11 @@ on:
     paths:
       - 'engine/lambda/**'
       - '.github/workflows/engine-lambda-deploy.yml'
+  workflow_run:
+    workflows:
+      - engine-infra-deploy
+    types:
+      - completed
 
 permissions:
   id-token: write
@@ -16,6 +21,7 @@ concurrency:
 
 jobs:
   deploy:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     env:
       # Stack outputs point to the artifact bucket and Lambda name.
@@ -24,6 +30,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          # For workflow_run triggers, deploy the same commit that passed infra.
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
 
       - name: Setup Java
         uses: actions/setup-java@v4
