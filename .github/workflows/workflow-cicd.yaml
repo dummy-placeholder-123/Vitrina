@@ -5,7 +5,7 @@ on:
     branches: [ main ]
     paths:
       - 'vitrina-mp/**'
-      - '.github/**'
+      - '.github/workflows/workflow-cicd.yaml'
       
 permissions:
   id-token: write
