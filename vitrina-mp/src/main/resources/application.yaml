@@ -41,12 +41,3 @@ management:
     health:
       probes:
         enabled: true
-
-# logging
-logging:
-  level:
-    org.hibernate.SQL: DEBUG
-    org.hibernate.orm.jdbc.bind: TRACE
-    org.hibernate.tool.schema: DEBUG
-    org.springframework.transaction: TRACE
-    com.zaxxer.hikari: DEBUG
