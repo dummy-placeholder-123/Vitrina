@@ -19,7 +19,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       # Stack outputs point to the artifact bucket and Lambda name.
-      STACK_NAME: LambdaInfraStack
+      STACK_NAME: ${{ vars.CDK_STACK_NAME || 'VitrinaInfraStack' }}
 
     steps:
       - name: Checkout
@@ -37,7 +37,7 @@ jobs:
         uses: aws-actions/configure-aws-credentials@v4
         with:
           # Use GitHub OIDC to assume the deploy role.
-          role-to-assume: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/custom-gh-cicd-role
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
 
       - name: Build
@@ -49,11 +49,11 @@ jobs:
         run: |
           set -euo pipefail
           # Pull bucket/key/function from CloudFormation outputs.
-          bucket=$(aws cloudformation describe-stacks --stack-name LambdaInfraStack \
+          bucket=$(aws cloudformation describe-stacks --stack-name "$STACK_NAME" \
             --query "Stacks[0].Outputs[?OutputKey=='ArtifactBucketName'].OutputValue" --output text)
-          key=$(aws cloudformation describe-stacks --stack-name LambdaInfraStack \
+          key=$(aws cloudformation describe-stacks --stack-name "$STACK_NAME" \
             --query "Stacks[0].Outputs[?OutputKey=='ArtifactKey'].OutputValue" --output text)
-          function_name=$(aws cloudformation describe-stacks --stack-name LambdaInfraStack \
+          function_name=$(aws cloudformation describe-stacks --stack-name "$STACK_NAME" \
             --query "Stacks[0].Outputs[?OutputKey=='LambdaFunctionName'].OutputValue" --output text)
           if [ -z "$bucket" ] || [ "$bucket" = "None" ]; then
             echo "ArtifactBucketName not found in stack outputs" >&2

@@ -1,4 +1,4 @@
-import { App } from 'aws-cdk-lib';
+import { App, DefaultStackSynthesizer } from 'aws-cdk-lib';
 import { VitrinaInfraStack } from './stack';
 
 const app = new App();
@@ -8,4 +8,7 @@ const env = process.env.CDK_DEFAULT_ACCOUNT && process.env.CDK_DEFAULT_REGION
   ? { account: process.env.CDK_DEFAULT_ACCOUNT, region: process.env.CDK_DEFAULT_REGION }
   : undefined;
 
-new VitrinaInfraStack(app, 'VitrinaInfraStack', { env });
+new VitrinaInfraStack(app, 'VitrinaInfraStack', {
+  env,
+  synthesizer: new DefaultStackSynthesizer({ qualifier: 'engine' }),
+});

@@ -24,8 +24,8 @@ export class VitrinaInfraStack extends Stack {
     });
 
     // Seed a placeholder object so the stack can create the Lambda on first deploy.
-    new s3deploy.BucketDeployment(this, 'LambdaArtifactSeed', {
-      sources: [s3deploy.Source.asset(path.join(__dirname, '..', 'assets', 'latest.jar'))],
+    const seedDeployment = new s3deploy.BucketDeployment(this, 'LambdaArtifactSeed', {
+      sources: [s3deploy.Source.asset(path.join(__dirname, '..', 'assets', 'seed'))],
       destinationBucket: artifactBucket,
       destinationKeyPrefix: 'lambda',
       prune: false,
@@ -60,6 +60,9 @@ export class VitrinaInfraStack extends Stack {
         SQS_QUEUE_URL: queue.queueUrl,
       },
     });
+
+    // Ensure the placeholder object exists before Lambda is created.
+    fn.node.addDependency(seedDeployment);
 
     // Allow the Lambda to send messages to the queue.
     queue.grantSendMessages(fn);

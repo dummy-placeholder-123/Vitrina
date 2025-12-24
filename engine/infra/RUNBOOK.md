@@ -1,5 +1,13 @@
 # Vitrina Engine Runbook
 
+
+## AWS
+aws configure sso --profile AdministratorAccess-289956717103
+aws sso login --profile AdministratorAccess-289956717103
+export AWS_PROFILE=AdministratorAccess-289956717103
+npx cdk bootstrap aws://289956717103/us-east-1
+
+
 ## Scope
 This runbook covers infra (CDK) and Lambda deployments for the engine package.
 
@@ -11,10 +19,10 @@ This runbook covers infra (CDK) and Lambda deployments for the engine package.
    - Secret: `AWS_ROLE_ARN`
    - Variable: `AWS_REGION` (example: `us-east-1`)
    - Optional Variable: `CDK_STACK_NAME` (default `VitrinaInfraStack`)
-3. Bootstrap CDK once per account/region:
+3. Bootstrap CDK once per account/region (note the qualifier used by this repo):
    - `cd engine/infra`
    - `npm ci`
-   - `npx cdk bootstrap`
+   - `npx cdk bootstrap --qualifier engine`
 
 ## Deploy infra (CDK)
 1. Make changes in `engine/infra`.
