@@ -81,8 +81,8 @@ jobs:
           echo "function_name=$function_name" >> "$GITHUB_OUTPUT"
 
       - name: Upload artifact
-        # Upload the freshly built jar to the shared artifact bucket.
-        run: aws s3 cp engine/lambda/target/lambda.jar s3://${{ steps.stack.outputs.bucket }}/${{ steps.stack.outputs.key }}
+        # Upload the freshly built zip to the shared artifact bucket.
+        run: aws s3 cp engine/lambda/target/lambda.zip s3://${{ steps.stack.outputs.bucket }}/${{ steps.stack.outputs.key }}
 
       - name: Update function code
         # Point Lambda to the new S3 object and wait for update to complete.

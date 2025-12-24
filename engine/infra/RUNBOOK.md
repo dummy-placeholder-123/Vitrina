@@ -53,7 +53,7 @@ Lambda:
 3. Resolve stack outputs:
    - `aws cloudformation describe-stacks --stack-name VitrinaInfraStack --query "Stacks[0].Outputs" --output table`
 4. Upload and update:
-   - `aws s3 cp target/lambda.jar s3://<ArtifactBucketName>/<ArtifactKey>`
+   - `aws s3 cp target/lambda.zip s3://<ArtifactBucketName>/<ArtifactKey>`
    - `aws lambda update-function-code --function-name <LambdaFunctionName> --s3-bucket <ArtifactBucketName> --s3-key <ArtifactKey>`
    - `aws lambda wait function-updated --function-name <LambdaFunctionName>`
 

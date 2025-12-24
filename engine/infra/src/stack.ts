@@ -8,13 +8,13 @@ import * as sqs from 'aws-cdk-lib/aws-sqs';
 import * as path from 'path';
 
 // S3 object key used by the Lambda deployment workflow.
-const ARTIFACT_KEY = 'lambda/latest.jar';
+const ARTIFACT_KEY = 'lambda/latest.zip';
 
 export class VitrinaInfraStack extends Stack {
   constructor(scope: Construct, id: string, props?: StackProps) {
     super(scope, id, props);
 
-    // Bucket stores the Lambda jar, retained across stack deletes.
+    // Bucket stores the Lambda deployment artifact, retained across stack deletes.
     const artifactBucket = new s3.Bucket(this, 'LambdaArtifactBucket', {
       blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
       encryption: s3.BucketEncryption.S3_MANAGED,
@@ -23,7 +23,7 @@ export class VitrinaInfraStack extends Stack {
       removalPolicy: RemovalPolicy.RETAIN,
     });
 
-    // Seed a placeholder object so the stack can create the Lambda on first deploy.
+    // Seed a placeholder artifact so the stack can create the Lambda on first deploy.
     const seedDeployment = new s3deploy.BucketDeployment(this, 'LambdaArtifactSeed', {
       sources: [s3deploy.Source.asset(path.join(__dirname, '..', 'assets', 'seed'))],
       destinationBucket: artifactBucket,
