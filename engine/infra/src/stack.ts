@@ -57,6 +57,7 @@ export class VitrinaInfraStack extends Stack {
       tracing: lambda.Tracing.ACTIVE,
       logRetention: logs.RetentionDays.ONE_MONTH,
       environment: {
+        MAIN_CLASS: 'com.vitrina.lambda.Application',
         SQS_QUEUE_URL: queue.queueUrl,
       },
     });
