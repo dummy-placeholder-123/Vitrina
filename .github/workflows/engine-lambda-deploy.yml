@@ -1,0 +1,85 @@
+name: engine-lambda-deploy
+
+on:
+  push:
+    paths:
+      - 'engine/lambda/**'
+      - '.github/workflows/engine-lambda-deploy.yml'
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: engine-lambda-deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      # Stack outputs point to the artifact bucket and Lambda name.
+      STACK_NAME: LambdaInfraStack
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+          # Maven cache speeds up dependency downloads.
+          cache: maven
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          # Use GitHub OIDC to assume the deploy role.
+          role-to-assume: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/custom-gh-cicd-role
+          aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
+
+      - name: Build
+        working-directory: engine/lambda
+        run: mvn -B package
+
+      - name: Resolve infra outputs
+        id: stack
+        run: |
+          set -euo pipefail
+          # Pull bucket/key/function from CloudFormation outputs.
+          bucket=$(aws cloudformation describe-stacks --stack-name LambdaInfraStack \
+            --query "Stacks[0].Outputs[?OutputKey=='ArtifactBucketName'].OutputValue" --output text)
+          key=$(aws cloudformation describe-stacks --stack-name LambdaInfraStack \
+            --query "Stacks[0].Outputs[?OutputKey=='ArtifactKey'].OutputValue" --output text)
+          function_name=$(aws cloudformation describe-stacks --stack-name LambdaInfraStack \
+            --query "Stacks[0].Outputs[?OutputKey=='LambdaFunctionName'].OutputValue" --output text)
+          if [ -z "$bucket" ] || [ "$bucket" = "None" ]; then
+            echo "ArtifactBucketName not found in stack outputs" >&2
+            exit 1
+          fi
+          if [ -z "$key" ] || [ "$key" = "None" ]; then
+            echo "ArtifactKey not found in stack outputs" >&2
+            exit 1
+          fi
+          if [ -z "$function_name" ] || [ "$function_name" = "None" ]; then
+            echo "LambdaFunctionName not found in stack outputs" >&2
+            exit 1
+          fi
+          echo "bucket=$bucket" >> "$GITHUB_OUTPUT"
+          echo "key=$key" >> "$GITHUB_OUTPUT"
+          echo "function_name=$function_name" >> "$GITHUB_OUTPUT"
+
+      - name: Upload artifact
+        # Upload the freshly built jar to the shared artifact bucket.
+        run: aws s3 cp engine/lambda/target/lambda.jar s3://${{ steps.stack.outputs.bucket }}/${{ steps.stack.outputs.key }}
+
+      - name: Update function code
+        # Point Lambda to the new S3 object and wait for update to complete.
+        run: |
+          aws lambda update-function-code \
+            --function-name "${{ steps.stack.outputs.function_name }}" \
+            --s3-bucket "${{ steps.stack.outputs.bucket }}" \
+            --s3-key "${{ steps.stack.outputs.key }}"
+          aws lambda wait function-updated --function-name "${{ steps.stack.outputs.function_name }}"

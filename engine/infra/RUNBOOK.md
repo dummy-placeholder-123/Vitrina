@@ -1,0 +1,62 @@
+# Vitrina Engine Runbook
+
+## Scope
+This runbook covers infra (CDK) and Lambda deployments for the engine package.
+
+## One-time setup
+1. Create an AWS OIDC role for GitHub Actions.
+   - Trust: GitHub OIDC provider for this repo.
+   - Permissions: CloudFormation, S3 (artifact bucket), Lambda, SQS, CloudWatch Logs, X-Ray, IAM PassRole for Lambda.
+2. Set repo secrets/vars (repo settings -> Actions):
+   - Secret: `AWS_ROLE_ARN`
+   - Variable: `AWS_REGION` (example: `us-east-1`)
+   - Optional Variable: `CDK_STACK_NAME` (default `VitrinaInfraStack`)
+3. Bootstrap CDK once per account/region:
+   - `cd engine/infra`
+   - `npm ci`
+   - `npx cdk bootstrap`
+
+## Deploy infra (CDK)
+1. Make changes in `engine/infra`.
+2. Push to the default branch.
+3. The workflow `engine-infra-deploy` runs automatically and deploys the stack.
+4. Confirm outputs in CloudFormation:
+   - `ArtifactBucketName`
+   - `ArtifactKey`
+   - `LambdaFunctionName`
+   - `SqsQueueUrl`
+
+## Deploy Lambda code
+1. Make changes in `engine/lambda`.
+2. Push to the default branch.
+3. The workflow `engine-lambda-deploy` builds the jar, uploads to S3, and updates Lambda.
+4. Verify the Lambda update completes (the workflow waits for function update).
+
+## Manual deploy (break glass)
+Infra:
+1. `cd engine/infra`
+2. `npm ci`
+3. `npm run build`
+4. `npx cdk deploy --require-approval never`
+
+Lambda:
+1. `cd engine/lambda`
+2. `mvn -B package`
+3. Resolve stack outputs:
+   - `aws cloudformation describe-stacks --stack-name VitrinaInfraStack --query "Stacks[0].Outputs" --output table`
+4. Upload and update:
+   - `aws s3 cp target/lambda.jar s3://<ArtifactBucketName>/<ArtifactKey>`
+   - `aws lambda update-function-code --function-name <LambdaFunctionName> --s3-bucket <ArtifactBucketName> --s3-key <ArtifactKey>`
+   - `aws lambda wait function-updated --function-name <LambdaFunctionName>`
+
+## Debugging Lambda issues
+1. CloudWatch logs: check `/aws/lambda/<LambdaFunctionName>` for errors and correlation IDs.
+2. X-Ray traces: enabled in the stack to pinpoint slow or failing segments.
+3. DLQ: inspect `PushDlq` for failed messages.
+4. Reproduce with a minimal event:
+   - `{"message":"hello","correlationId":"test-123"}`
+
+## Common failure causes
+- Missing `SQS_QUEUE_URL` environment variable (ensure infra is deployed).
+- IAM permissions on the Lambda role (SQS send permissions required).
+- Large payloads (SQS message max 256 KB).
