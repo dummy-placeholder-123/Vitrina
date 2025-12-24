@@ -55,7 +55,7 @@ export class VitrinaInfraStack extends Stack {
       memorySize: 512,
       timeout: Duration.seconds(20),
       tracing: lambda.Tracing.ACTIVE,
-      logRetention: logs.RetentionDays.THIRTY_DAYS,
+      logRetention: logs.RetentionDays.ONE_MONTH,
       environment: {
         SQS_QUEUE_URL: queue.queueUrl,
       },

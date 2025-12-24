@@ -1,6 +1,6 @@
 package com.vitrina.lambda;
 
-import org.springframework.cloud.function.adapter.aws.SpringBootRequestHandler;
+import org.springframework.cloud.function.adapter.aws.FunctionInvoker;
 
-public class Handler extends SpringBootRequestHandler<Object, Object> {
+public class Handler extends FunctionInvoker {
 }
