@@ -22,6 +22,7 @@ jobs:
         working-directory: engine/infra
     env:
       BOOTSTRAP_QUALIFIER: engine
+      AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
 
     steps:
       - name: Checkout
@@ -40,7 +41,7 @@ jobs:
         with:
           # Use GitHub OIDC to assume the deploy role.
           role-to-assume: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/custom-gh-cicd-role
-          aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
+          aws-region: ${{ env.AWS_REGION }}
 
       - name: Preflight bootstrap check
         # Fail fast with a clear message if the environment is not bootstrapped.
@@ -48,7 +49,8 @@ jobs:
           aws ssm get-parameter \
             --name "/cdk-bootstrap/${BOOTSTRAP_QUALIFIER}/version" \
             --query "Parameter.Value" \
-            --output text > /dev/null
+            --output text \
+            --region "$AWS_REGION" > /dev/null
 
       - name: Install dependencies
         run: npm ci

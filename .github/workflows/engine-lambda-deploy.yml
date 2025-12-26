@@ -26,6 +26,7 @@ jobs:
     env:
       # Stack outputs point to the artifact bucket and Lambda name.
       STACK_NAME: ${{ vars.CDK_STACK_NAME || 'VitrinaInfraStack' }}
+      AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
 
     steps:
       - name: Checkout
@@ -47,7 +48,7 @@ jobs:
         with:
           # Use GitHub OIDC to assume the deploy role.
           role-to-assume: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/custom-gh-cicd-role
-          aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
+          aws-region: ${{ env.AWS_REGION }}
 
       - name: Build
         working-directory: engine/lambda
@@ -59,11 +60,14 @@ jobs:
           set -euo pipefail
           # Pull bucket/key/function from CloudFormation outputs.
           bucket=$(aws cloudformation describe-stacks --stack-name "$STACK_NAME" \
-            --query "Stacks[0].Outputs[?OutputKey=='ArtifactBucketName'].OutputValue" --output text)
+            --query "Stacks[0].Outputs[?OutputKey=='ArtifactBucketName'].OutputValue" --output text \
+            --region "$AWS_REGION")
           key=$(aws cloudformation describe-stacks --stack-name "$STACK_NAME" \
-            --query "Stacks[0].Outputs[?OutputKey=='ArtifactKey'].OutputValue" --output text)
+            --query "Stacks[0].Outputs[?OutputKey=='ArtifactKey'].OutputValue" --output text \
+            --region "$AWS_REGION")
           function_name=$(aws cloudformation describe-stacks --stack-name "$STACK_NAME" \
-            --query "Stacks[0].Outputs[?OutputKey=='LambdaFunctionName'].OutputValue" --output text)
+            --query "Stacks[0].Outputs[?OutputKey=='LambdaFunctionName'].OutputValue" --output text \
+            --region "$AWS_REGION")
           if [ -z "$bucket" ] || [ "$bucket" = "None" ]; then
             echo "ArtifactBucketName not found in stack outputs" >&2
             exit 1
@@ -82,7 +86,7 @@ jobs:
 
       - name: Upload artifact
         # Upload the freshly built zip to the shared artifact bucket.
-        run: aws s3 cp engine/lambda/target/lambda.zip s3://${{ steps.stack.outputs.bucket }}/${{ steps.stack.outputs.key }}
+        run: aws s3 cp engine/lambda/target/lambda.zip s3://${{ steps.stack.outputs.bucket }}/${{ steps.stack.outputs.key }} --region "$AWS_REGION"
 
       - name: Update function code
         # Point Lambda to the new S3 object and wait for update to complete.
@@ -90,5 +94,6 @@ jobs:
           aws lambda update-function-code \
             --function-name "${{ steps.stack.outputs.function_name }}" \
             --s3-bucket "${{ steps.stack.outputs.bucket }}" \
-            --s3-key "${{ steps.stack.outputs.key }}"
-          aws lambda wait function-updated --function-name "${{ steps.stack.outputs.function_name }}"
+            --s3-key "${{ steps.stack.outputs.key }}" \
+            --region "$AWS_REGION"
+          aws lambda wait function-updated --function-name "${{ steps.stack.outputs.function_name }}" --region "$AWS_REGION"

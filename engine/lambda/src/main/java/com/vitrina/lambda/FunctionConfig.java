@@ -21,13 +21,18 @@ public class FunctionConfig {
   }
 
   @Bean
-  public MessagePublisher messagePublisher(SqsClient sqsClient,
-      @Value("${app.sqs.queue-url}") String queueUrl) {
-    return new SqsPublisher(sqsClient, queueUrl);
+  public Map<String, MessagePublisher> messagePublishers(SqsClient sqsClient,
+      @Value("${app.sqs.queue-url-a}") String queueUrlA,
+      @Value("${app.sqs.queue-url-b}") String queueUrlB) {
+    Map<String, MessagePublisher> publishers = new HashMap<>();
+    publishers.put("service-a", new SqsPublisher(sqsClient, queueUrlA));
+    publishers.put("service-b", new SqsPublisher(sqsClient, queueUrlB));
+    return Map.copyOf(publishers);
   }
 
   @Bean
-  public Function<Map<String, Object>, Map<String, String>> pushToSqs(MessagePublisher publisher) {
+  public Function<Map<String, Object>, Map<String, Object>> pushToSqs(
+      Map<String, MessagePublisher> publishers) {
     return input -> {
       Map<String, Object> safeInput = input == null ? Map.of() : input;
       String message = Objects.toString(safeInput.get("message"), "").trim();
@@ -43,9 +48,11 @@ public class FunctionConfig {
         logger.info("Sending message to SQS. messageLength={}", message.length());
       }
 
-      String messageId;
+      Map<String, String> messageIds = new HashMap<>();
       try {
-        messageId = publisher.publish(message);
+        for (Map.Entry<String, MessagePublisher> entry : publishers.entrySet()) {
+          messageIds.put(entry.getKey(), entry.getValue().publish(message));
+        }
       } catch (RuntimeException ex) {
         if (!correlationId.isEmpty()) {
           logger.error("Failed to publish message to SQS. correlationId={}", correlationId, ex);
@@ -55,8 +62,8 @@ public class FunctionConfig {
         throw ex;
       }
 
-      Map<String, String> response = new HashMap<>();
-      response.put("messageId", messageId);
+      Map<String, Object> response = new HashMap<>();
+      response.put("messageIds", messageIds);
       if (!correlationId.isEmpty()) {
         response.put("correlationId", correlationId);
       }
