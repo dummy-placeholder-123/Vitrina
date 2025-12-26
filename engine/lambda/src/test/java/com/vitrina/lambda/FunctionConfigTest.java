@@ -1,40 +1,72 @@
 package com.vitrina.lambda;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
 import org.junit.jupiter.api.Test;
 
 class FunctionConfigTest {
 
   @Test
-  void pushToSqsReturnsMessageIdsAndCorrelationId() {
+  void pushToSqsReturnsMessageIdsAndRequestId() throws Exception {
+    AtomicReference<String> messageBody = new AtomicReference<>();
     Map<String, MessagePublisher> publishers = Map.of(
-        "service-a", payload -> "msg-123",
-        "service-b", payload -> "msg-456");
-    FunctionConfig config = new FunctionConfig();
+        "serviceA", payload -> {
+          messageBody.set(payload);
+          return "msg-123";
+        },
+        "serviceB", payload -> "msg-456");
+    CapturingStore store = new CapturingStore();
+    ObjectMapper objectMapper = new ObjectMapper();
 
-    Function<Map<String, Object>, Map<String, Object>> fn = config.pushToSqs(publishers);
-    Map<String, Object> response = fn.apply(Map.of("message", "hello", "correlationId", "corr-1"));
+    PushService pushService = new PushService(publishers, store, objectMapper);
+    Function<Map<String, Object>, Map<String, Object>> fn = pushService::push;
+    Map<String, Object> response = fn.apply(Map.of("payload", Map.of("message", "hello")));
     @SuppressWarnings("unchecked")
     Map<String, String> messageIds = (Map<String, String>) response.get("messageIds");
 
-    assertEquals("msg-123", messageIds.get("service-a"));
-    assertEquals("msg-456", messageIds.get("service-b"));
-    assertEquals("corr-1", response.get("correlationId"));
+    assertEquals("msg-123", messageIds.get("serviceA"));
+    assertEquals("msg-456", messageIds.get("serviceB"));
+    assertNotNull(response.get("requestId"));
+    assertNotNull(store.requestId);
+    assertEquals("IN_PROGRESS", store.statuses.get("serviceA"));
+    assertEquals("IN_PROGRESS", store.statuses.get("serviceB"));
+
+    Map<String, Object> envelope = objectMapper.readValue(
+        messageBody.get(), new TypeReference<>() {});
+    assertNotNull(envelope.get("requestId"));
+    assertEquals(Map.of("message", "hello"), envelope.get("payload"));
   }
 
   @Test
-  void pushToSqsRequiresMessage() {
+  void pushToSqsRequiresPayload() {
     Map<String, MessagePublisher> publishers = Map.of(
-        "service-a", payload -> "msg-123",
-        "service-b", payload -> "msg-456");
-    FunctionConfig config = new FunctionConfig();
+        "serviceA", payload -> "msg-123",
+        "serviceB", payload -> "msg-456");
+    CapturingStore store = new CapturingStore();
+    ObjectMapper objectMapper = new ObjectMapper();
 
-    Function<Map<String, Object>, Map<String, Object>> fn = config.pushToSqs(publishers);
+    PushService pushService = new PushService(publishers, store, objectMapper);
+    Function<Map<String, Object>, Map<String, Object>> fn = pushService::push;
 
     assertThrows(IllegalArgumentException.class, () -> fn.apply(Map.of()));
+  }
+
+  private static final class CapturingStore implements OrchestrationStore {
+    private String requestId;
+    private Map<String, String> statuses = new HashMap<>();
+
+    @Override
+    public void recordStart(String requestId, Map<String, String> serviceStatuses) {
+      this.requestId = requestId;
+      this.statuses = new HashMap<>(serviceStatuses);
+    }
   }
 }

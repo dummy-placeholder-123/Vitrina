@@ -9,6 +9,8 @@ import * as logs from 'aws-cdk-lib/aws-logs';
 import * as s3 from 'aws-cdk-lib/aws-s3';
 import * as s3deploy from 'aws-cdk-lib/aws-s3-deployment';
 import * as sqs from 'aws-cdk-lib/aws-sqs';
+import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
+import * as apigateway from 'aws-cdk-lib/aws-apigateway';
 import * as path from 'path';
 
 // S3 object key used by the Lambda deployment workflow.
@@ -35,7 +37,23 @@ export class VitrinaInfraStack extends Stack {
       prune: false,
     });
 
-    const payloadBucket = new s3.Bucket(this, 'PayloadBucket', {
+    const serviceAPayloadBucket = new s3.Bucket(this, 'ServiceAPayloadBucket', {
+      blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
+      encryption: s3.BucketEncryption.S3_MANAGED,
+      enforceSSL: true,
+      versioned: true,
+      removalPolicy: RemovalPolicy.RETAIN,
+    });
+
+    const serviceBPayloadBucket = new s3.Bucket(this, 'ServiceBPayloadBucket', {
+      blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
+      encryption: s3.BucketEncryption.S3_MANAGED,
+      enforceSSL: true,
+      versioned: true,
+      removalPolicy: RemovalPolicy.RETAIN,
+    });
+
+    const orchestratedDetectionBucket = new s3.Bucket(this, 'OrchestratedDetectionBucket', {
       blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
       encryption: s3.BucketEncryption.S3_MANAGED,
       enforceSSL: true,
@@ -51,7 +69,7 @@ export class VitrinaInfraStack extends Stack {
 
     // Main queue for service A.
     const serviceAQueue = new sqs.Queue(this, 'PushQueue', {
-      visibilityTimeout: Duration.seconds(30),
+      visibilityTimeout: Duration.minutes(7),
       encryption: sqs.QueueEncryption.KMS_MANAGED,
       deadLetterQueue: {
         queue: serviceADlq,
@@ -66,12 +84,18 @@ export class VitrinaInfraStack extends Stack {
 
     // Fan-out queue for service B.
     const serviceBQueue = new sqs.Queue(this, 'ServiceBQueue', {
-      visibilityTimeout: Duration.seconds(30),
+      visibilityTimeout: Duration.minutes(7),
       encryption: sqs.QueueEncryption.KMS_MANAGED,
       deadLetterQueue: {
         queue: serviceBDlq,
         maxReceiveCount: 3,
       },
+    });
+
+    const statusTable = new dynamodb.Table(this, 'OrchestrationStatusTable', {
+      partitionKey: { name: 'requestId', type: dynamodb.AttributeType.STRING },
+      billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
+      removalPolicy: RemovalPolicy.RETAIN,
     });
 
     // Lambda reads code from the artifact bucket and writes logs + traces.
@@ -87,6 +111,8 @@ export class VitrinaInfraStack extends Stack {
         MAIN_CLASS: 'com.vitrina.lambda.Application',
         SQS_QUEUE_URL_A: serviceAQueue.queueUrl,
         SQS_QUEUE_URL_B: serviceBQueue.queueUrl,
+        STATUS_TABLE_NAME: statusTable.tableName,
+        ORCHESTRATED_BUCKET_NAME: orchestratedDetectionBucket.bucketName,
       },
     });
 
@@ -96,6 +122,26 @@ export class VitrinaInfraStack extends Stack {
     // Allow the Lambda to send messages to both queues.
     serviceAQueue.grantSendMessages(fn);
     serviceBQueue.grantSendMessages(fn);
+    statusTable.grantReadWriteData(fn);
+    orchestratedDetectionBucket.grantRead(fn);
+
+    const api = new apigateway.RestApi(this, 'OrchestrationApi', {
+      deployOptions: {
+        stageName: 'prod',
+      },
+    });
+    const lambdaIntegration = new apigateway.LambdaIntegration(fn);
+
+    const scanResource = api.root.addResource('scan');
+    scanResource.addMethod('POST', lambdaIntegration);
+
+    const statusResource = api.root.addResource('status');
+    statusResource.addMethod('GET', lambdaIntegration);
+    statusResource.addResource('{requestId}').addMethod('GET', lambdaIntegration);
+
+    const findingsResource = api.root.addResource('findings');
+    findingsResource.addMethod('GET', lambdaIntegration);
+    findingsResource.addResource('{requestId}').addMethod('GET', lambdaIntegration);
 
     const vpc = new ec2.Vpc(this, 'ServiceVpc', {
       maxAzs: 2,
@@ -122,8 +168,10 @@ export class VitrinaInfraStack extends Stack {
 
     serviceAQueue.grantConsumeMessages(serviceATaskRole);
     serviceBQueue.grantConsumeMessages(serviceBTaskRole);
-    payloadBucket.grantPut(serviceATaskRole);
-    payloadBucket.grantPut(serviceBTaskRole);
+    serviceAPayloadBucket.grantPut(serviceATaskRole);
+    serviceBPayloadBucket.grantPut(serviceBTaskRole);
+    statusTable.grantReadWriteData(serviceATaskRole);
+    statusTable.grantReadWriteData(serviceBTaskRole);
 
     const serviceALogGroup = new logs.LogGroup(this, 'ServiceALogGroup', {
       retention: logs.RetentionDays.ONE_MONTH,
@@ -151,8 +199,9 @@ export class VitrinaInfraStack extends Stack {
       }),
       environment: {
         SQS_QUEUE_URL: serviceAQueue.queueUrl,
-        PAYLOAD_BUCKET_NAME: payloadBucket.bucketName,
-        SERVICE_NAME: 'service-a',
+        PAYLOAD_BUCKET_NAME: serviceAPayloadBucket.bucketName,
+        SERVICE_NAME: 'serviceA',
+        STATUS_TABLE_NAME: statusTable.tableName,
       },
     });
 
@@ -164,8 +213,9 @@ export class VitrinaInfraStack extends Stack {
       }),
       environment: {
         SQS_QUEUE_URL: serviceBQueue.queueUrl,
-        PAYLOAD_BUCKET_NAME: payloadBucket.bucketName,
-        SERVICE_NAME: 'service-b',
+        PAYLOAD_BUCKET_NAME: serviceBPayloadBucket.bucketName,
+        SERVICE_NAME: 'serviceB',
+        STATUS_TABLE_NAME: statusTable.tableName,
       },
     });
 
@@ -191,11 +241,17 @@ export class VitrinaInfraStack extends Stack {
     new CfnOutput(this, 'LambdaFunctionName', { value: fn.functionName });
     new CfnOutput(this, 'ServiceAQueueUrl', { value: serviceAQueue.queueUrl });
     new CfnOutput(this, 'ServiceBQueueUrl', { value: serviceBQueue.queueUrl });
-    new CfnOutput(this, 'PayloadBucketName', { value: payloadBucket.bucketName });
+    new CfnOutput(this, 'ServiceAPayloadBucketName', { value: serviceAPayloadBucket.bucketName });
+    new CfnOutput(this, 'ServiceBPayloadBucketName', { value: serviceBPayloadBucket.bucketName });
+    new CfnOutput(this, 'OrchestratedDetectionBucketName', {
+      value: orchestratedDetectionBucket.bucketName,
+    });
     new CfnOutput(this, 'ServiceARepoName', { value: serviceARepo.repositoryName });
     new CfnOutput(this, 'ServiceBRepoName', { value: serviceBRepo.repositoryName });
     new CfnOutput(this, 'ServiceClusterName', { value: cluster.clusterName });
     new CfnOutput(this, 'ServiceAName', { value: serviceA.serviceName });
     new CfnOutput(this, 'ServiceBName', { value: serviceB.serviceName });
+    new CfnOutput(this, 'StatusTableName', { value: statusTable.tableName });
+    new CfnOutput(this, 'OrchestrationApiUrl', { value: api.url });
   }
 }
