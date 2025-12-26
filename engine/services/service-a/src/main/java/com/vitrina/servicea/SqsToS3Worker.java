@@ -57,11 +57,9 @@ public class SqsToS3Worker implements CommandLineRunner, DisposableBean {
 
   @Override
   public void run(String... args) {
-    Thread worker = new Thread(this::pollLoop, serviceName + "-sqs-worker");
-    worker.setDaemon(true);
-    worker.start();
     logger.info("Started SQS worker. service={}, queueUrl={}, bucket={}",
         serviceName, queueUrl, bucketName);
+    pollLoop();
   }
 
   private void pollLoop() {

@@ -1,6 +1,5 @@
 import { CfnOutput, Duration, RemovalPolicy, Stack, StackProps } from 'aws-cdk-lib';
 import { Construct } from 'constructs';
-import * as appautoscaling from 'aws-cdk-lib/aws-applicationautoscaling';
 import * as ec2 from 'aws-cdk-lib/aws-ec2';
 import * as ecr from 'aws-cdk-lib/aws-ecr';
 import * as ecs from 'aws-cdk-lib/aws-ecs';
@@ -173,7 +172,7 @@ export class VitrinaInfraStack extends Stack {
     const serviceA = new ecs.FargateService(this, 'ServiceA', {
       cluster,
       taskDefinition: serviceATaskDef,
-      desiredCount: 0,
+      desiredCount: 1,
       assignPublicIp: true,
       vpcSubnets: { subnetType: ec2.SubnetType.PUBLIC },
     });
@@ -181,33 +180,9 @@ export class VitrinaInfraStack extends Stack {
     const serviceB = new ecs.FargateService(this, 'ServiceB', {
       cluster,
       taskDefinition: serviceBTaskDef,
-      desiredCount: 0,
+      desiredCount: 1,
       assignPublicIp: true,
       vpcSubnets: { subnetType: ec2.SubnetType.PUBLIC },
-    });
-
-    const serviceAScaling = serviceA.autoScaleTaskCount({ minCapacity: 0, maxCapacity: 2 });
-    serviceAScaling.scaleOnMetric('ServiceAQueueDepth', {
-      metric: serviceAQueue.metricApproximateNumberOfMessagesVisible(),
-      scalingSteps: [
-        { upper: 0, change: 0 },
-        { lower: 1, change: 1 },
-        { lower: 25, change: 2 },
-      ],
-      adjustmentType: appautoscaling.AdjustmentType.CHANGE_IN_CAPACITY,
-      cooldown: Duration.seconds(60),
-    });
-
-    const serviceBScaling = serviceB.autoScaleTaskCount({ minCapacity: 0, maxCapacity: 5 });
-    serviceBScaling.scaleOnMetric('ServiceBQueueDepth', {
-      metric: serviceBQueue.metricApproximateNumberOfMessagesVisible(),
-      scalingSteps: [
-        { upper: 0, change: 0 },
-        { lower: 1, change: 1 },
-        { lower: 50, change: 3 },
-      ],
-      adjustmentType: appautoscaling.AdjustmentType.CHANGE_IN_CAPACITY,
-      cooldown: Duration.seconds(60),
     });
 
     // Outputs are used by the Lambda deployment workflow.
