@@ -1,6 +1,7 @@
 name: engine-service-merge-deploy
 
 on:
+  workflow_dispatch:
   push:
     paths:
       - 'engine/services/service-merge/**'

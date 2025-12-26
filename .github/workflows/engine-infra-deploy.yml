@@ -1,6 +1,7 @@
 name: engine-infra-deploy
 
 on:
+  workflow_dispatch:
   push:
     paths:
       - 'engine/infra/**'

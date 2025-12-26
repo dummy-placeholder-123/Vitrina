@@ -1,6 +1,7 @@
 name: engine-service-a-deploy
 
 on:
+  workflow_dispatch:
   push:
     paths:
       - 'engine/services/service-a/**'

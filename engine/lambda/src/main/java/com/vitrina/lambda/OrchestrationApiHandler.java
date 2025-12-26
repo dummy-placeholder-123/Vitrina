@@ -113,6 +113,8 @@ public class OrchestrationApiHandler {
       return jsonResponse(200, paginateFindings(findingsJson, requestId, objectKey, event));
     } catch (NotFoundException ex) {
       return errorResponse(404, ex.getMessage());
+    } catch (Exception ex) {
+      return errorResponse(500, "Internal server error");
     }
   }
 

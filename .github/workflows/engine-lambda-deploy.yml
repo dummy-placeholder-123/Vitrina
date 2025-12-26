@@ -1,6 +1,7 @@
 name: engine-lambda-deploy
 
 on:
+  workflow_dispatch:
   push:
     paths:
       - 'engine/lambda/**'
