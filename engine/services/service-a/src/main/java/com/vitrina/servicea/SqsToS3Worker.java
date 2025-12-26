@@ -5,12 +5,14 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
+import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.DisposableBean;
@@ -20,6 +22,7 @@ import org.springframework.stereotype.Component;
 import software.amazon.awssdk.core.sync.RequestBody;
 import software.amazon.awssdk.services.dynamodb.DynamoDbClient;
 import software.amazon.awssdk.services.dynamodb.model.AttributeValue;
+import software.amazon.awssdk.services.dynamodb.model.ConditionalCheckFailedException;
 import software.amazon.awssdk.services.dynamodb.model.UpdateItemRequest;
 import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.model.PutObjectRequest;
@@ -27,6 +30,7 @@ import software.amazon.awssdk.services.sqs.SqsClient;
 import software.amazon.awssdk.services.sqs.model.DeleteMessageRequest;
 import software.amazon.awssdk.services.sqs.model.Message;
 import software.amazon.awssdk.services.sqs.model.ReceiveMessageRequest;
+import software.amazon.awssdk.services.sqs.model.SendMessageRequest;
 
 @Component
 public class SqsToS3Worker implements CommandLineRunner, DisposableBean {
@@ -43,6 +47,8 @@ public class SqsToS3Worker implements CommandLineRunner, DisposableBean {
   private final String bucketName;
   private final String serviceName;
   private final String tableName;
+  private final String mergeQueueUrl;
+  private final List<String> expectedServices;
 
   public SqsToS3Worker(SqsClient sqsClient,
       S3Client s3Client,
@@ -51,7 +57,9 @@ public class SqsToS3Worker implements CommandLineRunner, DisposableBean {
       @Value("${app.sqs.queue-url}") String queueUrl,
       @Value("${app.s3.bucket-name}") String bucketName,
       @Value("${app.service.name}") String serviceName,
-      @Value("${app.dynamo.table-name}") String tableName) {
+      @Value("${app.dynamo.table-name}") String tableName,
+      @Value("${app.sqs.merge-queue-url}") String mergeQueueUrl,
+      @Value("${app.expected-services}") String expectedServices) {
     this.sqsClient = Objects.requireNonNull(sqsClient, "sqsClient");
     this.s3Client = Objects.requireNonNull(s3Client, "s3Client");
     this.dynamoDbClient = Objects.requireNonNull(dynamoDbClient, "dynamoDbClient");
@@ -68,10 +76,15 @@ public class SqsToS3Worker implements CommandLineRunner, DisposableBean {
     if (tableName == null || tableName.isBlank()) {
       throw new IllegalStateException("DynamoDB table name is required");
     }
+    if (mergeQueueUrl == null || mergeQueueUrl.isBlank()) {
+      throw new IllegalStateException("Merge queue URL is required");
+    }
     this.queueUrl = queueUrl;
     this.bucketName = bucketName;
     this.serviceName = serviceName;
     this.tableName = tableName;
+    this.mergeQueueUrl = mergeQueueUrl;
+    this.expectedServices = parseExpectedServices(expectedServices);
   }
 
   @Override
@@ -131,7 +144,8 @@ public class SqsToS3Worker implements CommandLineRunner, DisposableBean {
       s3Client.putObject(putRequest,
           RequestBody.fromBytes(objectMapper.writeValueAsBytes(output)));
 
-      updateStatus(requestId, "DONE");
+      updateStatus(requestId, "DONE", key);
+      tryTriggerMerge(requestId);
 
       sqsClient.deleteMessage(DeleteMessageRequest.builder()
           .queueUrl(queueUrl)
@@ -160,18 +174,105 @@ public class SqsToS3Worker implements CommandLineRunner, DisposableBean {
     return payload;
   }
 
-  private void updateStatus(String requestId, String status) {
+  private void updateStatus(String requestId, String status, String outputKey) {
     UpdateItemRequest request = UpdateItemRequest.builder()
         .tableName(tableName)
         .key(Map.of("requestId", AttributeValue.builder().s(requestId).build()))
-        .updateExpression("SET #engine.#service = :status")
+        .updateExpression("SET #engine.#service = :status, #outputs.#service = :outputKey")
         .expressionAttributeNames(Map.of(
             "#engine", "engine",
+            "#outputs", "outputs",
             "#service", serviceName))
         .expressionAttributeValues(Map.of(
-            ":status", AttributeValue.builder().s(status).build()))
+            ":status", AttributeValue.builder().s(status).build(),
+            ":outputKey", AttributeValue.builder().s(outputKey).build()))
         .build();
     dynamoDbClient.updateItem(request);
+  }
+
+  private void tryTriggerMerge(String requestId) {
+    if (expectedServices.isEmpty()) {
+      logger.warn("Expected services list is empty. Skipping merge trigger. requestId={}", requestId);
+      return;
+    }
+    if (!markMergeInProgress(requestId)) {
+      return;
+    }
+    try {
+      String body = objectMapper.writeValueAsString(Map.of("requestId", requestId));
+      sqsClient.sendMessage(SendMessageRequest.builder()
+          .queueUrl(mergeQueueUrl)
+          .messageBody(body)
+          .build());
+      logger.info("Triggered merge. requestId={}", requestId);
+    } catch (Exception ex) {
+      logger.error("Failed to send merge event. requestId={}", requestId, ex);
+      resetMergeStatus(requestId);
+      throw new RuntimeException(ex);
+    }
+  }
+
+  private boolean markMergeInProgress(String requestId) {
+    Map<String, String> attributeNames = new LinkedHashMap<>();
+    attributeNames.put("#engine", "engine");
+    attributeNames.put("#finalStatus", "finalStatus");
+
+    Map<String, AttributeValue> attributeValues = new LinkedHashMap<>();
+    attributeValues.put(":pending", AttributeValue.builder().s("PENDING").build());
+    attributeValues.put(":merging", AttributeValue.builder().s("MERGING").build());
+    attributeValues.put(":done", AttributeValue.builder().s("DONE").build());
+
+    StringBuilder condition = new StringBuilder("#finalStatus = :pending");
+    int index = 0;
+    for (String service : expectedServices) {
+      String key = "#svc" + index++;
+      attributeNames.put(key, service);
+      condition.append(" AND #engine.").append(key).append(" = :done");
+    }
+
+    UpdateItemRequest request = UpdateItemRequest.builder()
+        .tableName(tableName)
+        .key(Map.of("requestId", AttributeValue.builder().s(requestId).build()))
+        .updateExpression("SET #finalStatus = :merging")
+        .conditionExpression(condition.toString())
+        .expressionAttributeNames(attributeNames)
+        .expressionAttributeValues(attributeValues)
+        .build();
+    try {
+      dynamoDbClient.updateItem(request);
+      return true;
+    } catch (ConditionalCheckFailedException ex) {
+      return false;
+    }
+  }
+
+  private void resetMergeStatus(String requestId) {
+    UpdateItemRequest request = UpdateItemRequest.builder()
+        .tableName(tableName)
+        .key(Map.of("requestId", AttributeValue.builder().s(requestId).build()))
+        .updateExpression("SET #finalStatus = :pending")
+        .conditionExpression("#finalStatus = :merging")
+        .expressionAttributeNames(Map.of("#finalStatus", "finalStatus"))
+        .expressionAttributeValues(Map.of(
+            ":pending", AttributeValue.builder().s("PENDING").build(),
+            ":merging", AttributeValue.builder().s("MERGING").build()))
+        .build();
+    try {
+      dynamoDbClient.updateItem(request);
+    } catch (Exception ex) {
+      logger.warn("Failed to reset merge status. requestId={}", requestId, ex);
+    }
+  }
+
+  private List<String> parseExpectedServices(String expectedServices) {
+    if (expectedServices == null || expectedServices.isBlank()) {
+      return List.of();
+    }
+    return Arrays.stream(expectedServices.split(","))
+        .map(String::trim)
+        .filter(value -> !value.isEmpty())
+        .distinct()
+        .collect(Collectors.toList());
   }
 
   private void sleepQuietly(long millis) {

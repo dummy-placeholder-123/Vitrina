@@ -29,6 +29,7 @@ public class DynamoDbOrchestrationStore implements OrchestrationStore {
     Map<String, AttributeValue> item = new HashMap<>();
     item.put("requestId", AttributeValue.builder().s(requestId).build());
     item.put("engine", AttributeValue.builder().m(engineMap).build());
+    item.put("finalStatus", AttributeValue.builder().s("PENDING").build());
 
     dynamoDbClient.putItem(PutItemRequest.builder()
         .tableName(tableName)

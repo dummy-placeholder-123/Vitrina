@@ -21,6 +21,10 @@ public class OrchestrationStatusReader {
   }
 
   public Map<String, String> readEngineStatus(String requestId) {
+    return readRecord(requestId).getEngine();
+  }
+
+  public OrchestrationRecord readRecord(String requestId) {
     GetItemResponse response = dynamoDbClient.getItem(GetItemRequest.builder()
         .tableName(tableName)
         .key(Map.of("requestId", AttributeValue.builder().s(requestId).build()))
@@ -31,15 +35,30 @@ public class OrchestrationStatusReader {
       throw new NotFoundException("requestId not found");
     }
 
-    AttributeValue engineAttr = response.item().get("engine");
-    if (engineAttr == null || engineAttr.m() == null) {
+    Map<String, AttributeValue> item = response.item();
+    Map<String, String> engine = readStringMap(item.get("engine"));
+    Map<String, String> outputs = readStringMap(item.get("outputs"));
+    String finalStatus = readString(item.get("finalStatus"));
+    String mergedKey = readString(item.get("mergedKey"));
+
+    return new OrchestrationRecord(requestId, engine, outputs, finalStatus, mergedKey);
+  }
+
+  private Map<String, String> readStringMap(AttributeValue attr) {
+    if (attr == null || attr.m() == null) {
       return Map.of();
     }
-
-    Map<String, String> statuses = new HashMap<>();
-    for (Map.Entry<String, AttributeValue> entry : engineAttr.m().entrySet()) {
-      statuses.put(entry.getKey(), entry.getValue().s());
+    Map<String, String> values = new HashMap<>();
+    for (Map.Entry<String, AttributeValue> entry : attr.m().entrySet()) {
+      values.put(entry.getKey(), entry.getValue().s());
     }
-    return statuses;
+    return values;
+  }
+
+  private String readString(AttributeValue attr) {
+    if (attr == null) {
+      return null;
+    }
+    return attr.s();
   }
 }

@@ -92,6 +92,20 @@ export class VitrinaInfraStack extends Stack {
       },
     });
 
+    const mergeDlq = new sqs.Queue(this, 'MergeDlq', {
+      retentionPeriod: Duration.days(14),
+      encryption: sqs.QueueEncryption.KMS_MANAGED,
+    });
+
+    const mergeQueue = new sqs.Queue(this, 'MergeQueue', {
+      visibilityTimeout: Duration.minutes(2),
+      encryption: sqs.QueueEncryption.KMS_MANAGED,
+      deadLetterQueue: {
+        queue: mergeDlq,
+        maxReceiveCount: 3,
+      },
+    });
+
     const statusTable = new dynamodb.Table(this, 'OrchestrationStatusTable', {
       partitionKey: { name: 'requestId', type: dynamodb.AttributeType.STRING },
       billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
@@ -158,6 +172,7 @@ export class VitrinaInfraStack extends Stack {
 
     const serviceARepo = new ecr.Repository(this, 'ServiceARepo');
     const serviceBRepo = new ecr.Repository(this, 'ServiceBRepo');
+    const mergeServiceRepo = new ecr.Repository(this, 'MergeServiceRepo');
 
     const serviceATaskRole = new iam.Role(this, 'ServiceATaskRole', {
       assumedBy: new iam.ServicePrincipal('ecs-tasks.amazonaws.com'),
@@ -165,18 +180,31 @@ export class VitrinaInfraStack extends Stack {
     const serviceBTaskRole = new iam.Role(this, 'ServiceBTaskRole', {
       assumedBy: new iam.ServicePrincipal('ecs-tasks.amazonaws.com'),
     });
+    const mergeTaskRole = new iam.Role(this, 'MergeTaskRole', {
+      assumedBy: new iam.ServicePrincipal('ecs-tasks.amazonaws.com'),
+    });
 
     serviceAQueue.grantConsumeMessages(serviceATaskRole);
     serviceBQueue.grantConsumeMessages(serviceBTaskRole);
+    mergeQueue.grantSendMessages(serviceATaskRole);
+    mergeQueue.grantSendMessages(serviceBTaskRole);
+    mergeQueue.grantConsumeMessages(mergeTaskRole);
     serviceAPayloadBucket.grantPut(serviceATaskRole);
     serviceBPayloadBucket.grantPut(serviceBTaskRole);
+    serviceAPayloadBucket.grantRead(mergeTaskRole);
+    serviceBPayloadBucket.grantRead(mergeTaskRole);
+    orchestratedDetectionBucket.grantPut(mergeTaskRole);
     statusTable.grantReadWriteData(serviceATaskRole);
     statusTable.grantReadWriteData(serviceBTaskRole);
+    statusTable.grantReadWriteData(mergeTaskRole);
 
     const serviceALogGroup = new logs.LogGroup(this, 'ServiceALogGroup', {
       retention: logs.RetentionDays.ONE_MONTH,
     });
     const serviceBLogGroup = new logs.LogGroup(this, 'ServiceBLogGroup', {
+      retention: logs.RetentionDays.ONE_MONTH,
+    });
+    const mergeLogGroup = new logs.LogGroup(this, 'MergeLogGroup', {
       retention: logs.RetentionDays.ONE_MONTH,
     });
 
@@ -190,6 +218,11 @@ export class VitrinaInfraStack extends Stack {
       memoryLimitMiB: 1024,
       taskRole: serviceBTaskRole,
     });
+    const mergeTaskDef = new ecs.FargateTaskDefinition(this, 'MergeTaskDef', {
+      cpu: 256,
+      memoryLimitMiB: 512,
+      taskRole: mergeTaskRole,
+    });
 
     serviceATaskDef.addContainer('ServiceAContainer', {
       image: ecs.ContainerImage.fromEcrRepository(serviceARepo, 'latest'),
@@ -202,6 +235,8 @@ export class VitrinaInfraStack extends Stack {
         PAYLOAD_BUCKET_NAME: serviceAPayloadBucket.bucketName,
         SERVICE_NAME: 'serviceA',
         STATUS_TABLE_NAME: statusTable.tableName,
+        MERGE_QUEUE_URL: mergeQueue.queueUrl,
+        EXPECTED_SERVICES: 'serviceA,serviceB',
       },
     });
 
@@ -215,6 +250,23 @@ export class VitrinaInfraStack extends Stack {
         SQS_QUEUE_URL: serviceBQueue.queueUrl,
         PAYLOAD_BUCKET_NAME: serviceBPayloadBucket.bucketName,
         SERVICE_NAME: 'serviceB',
+        STATUS_TABLE_NAME: statusTable.tableName,
+        MERGE_QUEUE_URL: mergeQueue.queueUrl,
+        EXPECTED_SERVICES: 'serviceA,serviceB',
+      },
+    });
+
+    mergeTaskDef.addContainer('MergeContainer', {
+      image: ecs.ContainerImage.fromEcrRepository(mergeServiceRepo, 'latest'),
+      logging: ecs.LogDriver.awsLogs({
+        logGroup: mergeLogGroup,
+        streamPrefix: 'merge',
+      }),
+      environment: {
+        SQS_QUEUE_URL: mergeQueue.queueUrl,
+        SERVICE_A_BUCKET_NAME: serviceAPayloadBucket.bucketName,
+        SERVICE_B_BUCKET_NAME: serviceBPayloadBucket.bucketName,
+        ORCHESTRATED_BUCKET_NAME: orchestratedDetectionBucket.bucketName,
         STATUS_TABLE_NAME: statusTable.tableName,
       },
     });
@@ -235,6 +287,14 @@ export class VitrinaInfraStack extends Stack {
       vpcSubnets: { subnetType: ec2.SubnetType.PUBLIC },
     });
 
+    const mergeService = new ecs.FargateService(this, 'MergeService', {
+      cluster,
+      taskDefinition: mergeTaskDef,
+      desiredCount: 1,
+      assignPublicIp: true,
+      vpcSubnets: { subnetType: ec2.SubnetType.PUBLIC },
+    });
+
     // Outputs are used by the Lambda deployment workflow.
     new CfnOutput(this, 'ArtifactBucketName', { value: artifactBucket.bucketName });
     new CfnOutput(this, 'ArtifactKey', { value: ARTIFACT_KEY });
@@ -248,9 +308,12 @@ export class VitrinaInfraStack extends Stack {
     });
     new CfnOutput(this, 'ServiceARepoName', { value: serviceARepo.repositoryName });
     new CfnOutput(this, 'ServiceBRepoName', { value: serviceBRepo.repositoryName });
+    new CfnOutput(this, 'MergeServiceRepoName', { value: mergeServiceRepo.repositoryName });
     new CfnOutput(this, 'ServiceClusterName', { value: cluster.clusterName });
     new CfnOutput(this, 'ServiceAName', { value: serviceA.serviceName });
     new CfnOutput(this, 'ServiceBName', { value: serviceB.serviceName });
+    new CfnOutput(this, 'MergeServiceName', { value: mergeService.serviceName });
+    new CfnOutput(this, 'MergeQueueUrl', { value: mergeQueue.queueUrl });
     new CfnOutput(this, 'StatusTableName', { value: statusTable.tableName });
     new CfnOutput(this, 'OrchestrationApiUrl', { value: api.url });
   }

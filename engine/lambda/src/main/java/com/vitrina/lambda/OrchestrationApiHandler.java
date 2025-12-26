@@ -1,6 +1,8 @@
 package com.vitrina.lambda;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 import java.util.HashMap;
@@ -71,10 +73,12 @@ public class OrchestrationApiHandler {
       return errorResponse(400, "requestId is required");
     }
     try {
-      Map<String, String> engineStatus = statusReader.readEngineStatus(requestId);
+      OrchestrationRecord record = statusReader.readRecord(requestId);
       Map<String, Object> payload = new HashMap<>();
       payload.put("requestId", requestId);
-      payload.put("engine", engineStatus);
+      payload.put("engine", record.getEngine());
+      payload.put("finalStatus", record.getFinalStatus());
+      payload.put("mergedKey", record.getMergedKey());
       return jsonResponse(200, payload);
     } catch (NotFoundException ex) {
       return errorResponse(404, ex.getMessage());
@@ -86,14 +90,27 @@ public class OrchestrationApiHandler {
     if (requestId == null || requestId.isBlank()) {
       return errorResponse(400, "requestId is required");
     }
-    String objectKey = extractQueryParam(event, "key");
-    if (objectKey == null || objectKey.isBlank()) {
-      objectKey = requestId + ".json";
-    }
-
     try {
+      OrchestrationRecord record = statusReader.readRecord(requestId);
+      String finalStatus = record.getFinalStatus();
+      if (finalStatus == null || !finalStatus.equalsIgnoreCase("DONE")) {
+        Map<String, Object> payload = new HashMap<>();
+        payload.put("requestId", requestId);
+        payload.put("finalStatus", finalStatus == null ? "PENDING" : finalStatus);
+        payload.put("engine", record.getEngine());
+        return jsonResponse(202, payload);
+      }
+
+      String objectKey = extractQueryParam(event, "key");
+      if (objectKey == null || objectKey.isBlank()) {
+        objectKey = record.getMergedKey();
+      }
+      if (objectKey == null || objectKey.isBlank()) {
+        objectKey = requestId + ".json";
+      }
+
       String findingsJson = findingsReader.readFindings(objectKey);
-      return rawJsonResponse(200, findingsJson);
+      return jsonResponse(200, paginateFindings(findingsJson, requestId, objectKey, event));
     } catch (NotFoundException ex) {
       return errorResponse(404, ex.getMessage());
     }
@@ -186,6 +203,57 @@ public class OrchestrationApiHandler {
   private Map<String, Object> errorResponse(int statusCode, String message) {
     Map<String, Object> payload = Map.of("error", message);
     return jsonResponse(statusCode, payload);
+  }
+
+  private Map<String, Object> paginateFindings(String findingsJson,
+      String requestId,
+      String objectKey,
+      Map<String, Object> event) throws Exception {
+    JsonNode root = objectMapper.readTree(findingsJson);
+    JsonNode itemsNode = root;
+    if (root.isObject() && root.has("items")) {
+      itemsNode = root.get("items");
+    }
+    if (!itemsNode.isArray()) {
+      ArrayNode wrapped = objectMapper.createArrayNode();
+      wrapped.add(root);
+      itemsNode = wrapped;
+    }
+
+    int total = itemsNode.size();
+    int page = parsePositiveInt(extractQueryParam(event, "page"), 1);
+    int size = parsePositiveInt(extractQueryParam(event, "size"), 50);
+    if (size > 200) {
+      size = 200;
+    }
+    int fromIndex = Math.max(0, (page - 1) * size);
+    int toIndex = Math.min(total, fromIndex + size);
+
+    ArrayNode pageItems = objectMapper.createArrayNode();
+    for (int i = fromIndex; i < toIndex; i++) {
+      pageItems.add(itemsNode.get(i));
+    }
+
+    Map<String, Object> payload = new HashMap<>();
+    payload.put("requestId", requestId);
+    payload.put("mergedKey", objectKey);
+    payload.put("page", page);
+    payload.put("size", size);
+    payload.put("total", total);
+    payload.put("items", pageItems);
+    return payload;
+  }
+
+  private int parsePositiveInt(String rawValue, int fallback) {
+    if (rawValue == null || rawValue.isBlank()) {
+      return fallback;
+    }
+    try {
+      int value = Integer.parseInt(rawValue.trim());
+      return value > 0 ? value : fallback;
+    } catch (NumberFormatException ex) {
+      return fallback;
+    }
   }
 
   private boolean isBase64Encoded(Map<String, Object> event) {
