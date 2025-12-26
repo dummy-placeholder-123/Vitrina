@@ -1,0 +1,97 @@
+name: engine-service-merge-deploy
+
+on:
+  push:
+    paths:
+      - 'engine/services/service-merge/**'
+      - '.github/workflows/engine-service-merge-deploy.yml'
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: engine-service-merge-deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      STACK_NAME: ${{ vars.CDK_STACK_NAME || 'VitrinaInfraStack' }}
+      AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+          cache: maven
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          # Use GitHub OIDC to assume the deploy role.
+          role-to-assume: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/custom-gh-cicd-role
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Build
+        working-directory: engine/services/service-merge
+        run: mvn -B package
+
+      - name: Resolve infra outputs
+        id: stack
+        run: |
+          set -euo pipefail
+          repo=$(aws cloudformation describe-stacks --stack-name "$STACK_NAME" \
+            --query "Stacks[0].Outputs[?OutputKey=='MergeServiceRepoName'].OutputValue" --output text \
+            --region "$AWS_REGION")
+          cluster=$(aws cloudformation describe-stacks --stack-name "$STACK_NAME" \
+            --query "Stacks[0].Outputs[?OutputKey=='ServiceClusterName'].OutputValue" --output text \
+            --region "$AWS_REGION")
+          service=$(aws cloudformation describe-stacks --stack-name "$STACK_NAME" \
+            --query "Stacks[0].Outputs[?OutputKey=='MergeServiceName'].OutputValue" --output text \
+            --region "$AWS_REGION")
+          if [ -z "$repo" ] || [ "$repo" = "None" ]; then
+            echo "MergeServiceRepoName not found in stack outputs" >&2
+            exit 1
+          fi
+          if [ -z "$cluster" ] || [ "$cluster" = "None" ]; then
+            echo "ServiceClusterName not found in stack outputs" >&2
+            exit 1
+          fi
+          if [ -z "$service" ] || [ "$service" = "None" ]; then
+            echo "MergeServiceName not found in stack outputs" >&2
+            exit 1
+          fi
+          echo "repo=$repo" >> "$GITHUB_OUTPUT"
+          echo "cluster=$cluster" >> "$GITHUB_OUTPUT"
+          echo "service=$service" >> "$GITHUB_OUTPUT"
+
+      - name: Login to ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push image
+        run: |
+          registry="${{ steps.login-ecr.outputs.registry }}"
+          repo="${{ steps.stack.outputs.repo }}"
+          image="$registry/$repo:latest"
+          docker build -t "$image" -f engine/services/service-merge/Dockerfile engine/services/service-merge
+          docker push "$image"
+
+      - name: Update service
+        run: |
+          aws ecs update-service \
+            --cluster "${{ steps.stack.outputs.cluster }}" \
+            --service "${{ steps.stack.outputs.service }}" \
+            --force-new-deployment \
+            --region "$AWS_REGION"
+          aws ecs wait services-stable \
+            --cluster "${{ steps.stack.outputs.cluster }}" \
+            --services "${{ steps.stack.outputs.service }}" \
+            --region "$AWS_REGION"
