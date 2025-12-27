@@ -137,7 +137,6 @@ public class SqsToS3Worker implements CommandLineRunner, DisposableBean {
 
       String key = serviceName + "/" + PATH_FORMATTER.format(Instant.now())
           + "/" + requestId + "-" + message.messageId() + ".json";
-      updateStatus(requestId, "PROCESSING");
       PutObjectRequest putRequest = PutObjectRequest.builder()
           .bucket(bucketName)
           .key(key)
@@ -188,20 +187,6 @@ public class SqsToS3Worker implements CommandLineRunner, DisposableBean {
         .expressionAttributeValues(Map.of(
             ":status", AttributeValue.builder().s(status).build(),
             ":outputKey", AttributeValue.builder().s(outputKey).build()))
-        .build();
-    dynamoDbClient.updateItem(request);
-  }
-
-  private void updateStatus(String requestId, String status) {
-    UpdateItemRequest request = UpdateItemRequest.builder()
-        .tableName(tableName)
-        .key(Map.of("requestId", AttributeValue.builder().s(requestId).build()))
-        .updateExpression("SET #engine.#service = :status")
-        .expressionAttributeNames(Map.of(
-            "#engine", "engine",
-            "#service", serviceName))
-        .expressionAttributeValues(Map.of(
-            ":status", AttributeValue.builder().s(status).build()))
         .build();
     dynamoDbClient.updateItem(request);
   }

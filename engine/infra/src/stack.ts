@@ -387,7 +387,7 @@ export class VitrinaInfraStack extends Stack {
     const serviceA = new ecs.FargateService(this, 'ServiceA', {
       cluster,
       taskDefinition: serviceATaskDef,
-      desiredCount: 0,
+      desiredCount: 1,
       assignPublicIp: true,
       vpcSubnets: { subnetType: ec2.SubnetType.PUBLIC },
       serviceName: names.serviceAService,
@@ -396,7 +396,7 @@ export class VitrinaInfraStack extends Stack {
     const serviceB = new ecs.FargateService(this, 'ServiceB', {
       cluster,
       taskDefinition: serviceBTaskDef,
-      desiredCount: 0,
+      desiredCount: 1,
       assignPublicIp: true,
       vpcSubnets: { subnetType: ec2.SubnetType.PUBLIC },
       serviceName: names.serviceBService,
@@ -405,7 +405,7 @@ export class VitrinaInfraStack extends Stack {
     const mergeService = new ecs.FargateService(this, 'MergeService', {
       cluster,
       taskDefinition: mergeTaskDef,
-      desiredCount: 0,
+      desiredCount: 1,
       assignPublicIp: true,
       vpcSubnets: { subnetType: ec2.SubnetType.PUBLIC },
       serviceName: names.mergeService,
