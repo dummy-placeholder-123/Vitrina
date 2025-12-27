@@ -10,7 +10,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
 import org.slf4j.Logger;
@@ -37,6 +36,8 @@ public class SqsToS3Worker implements CommandLineRunner, DisposableBean {
   private static final Logger logger = LoggerFactory.getLogger(SqsToS3Worker.class);
   private static final DateTimeFormatter PATH_FORMATTER =
       DateTimeFormatter.ofPattern("yyyy/MM/dd/HH").withZone(ZoneOffset.UTC);
+  private static final int WAIT_TIME_SECONDS = 20;
+  private static final long IDLE_SLEEP_MILLIS = 40_000;
 
   private final AtomicBoolean running = new AtomicBoolean(true);
   private final SqsClient sqsClient;
@@ -98,12 +99,16 @@ public class SqsToS3Worker implements CommandLineRunner, DisposableBean {
     ReceiveMessageRequest request = ReceiveMessageRequest.builder()
         .queueUrl(queueUrl)
         .maxNumberOfMessages(10)
-        .waitTimeSeconds(20)
+        .waitTimeSeconds(WAIT_TIME_SECONDS)
         .build();
 
     while (running.get()) {
       try {
         List<Message> messages = sqsClient.receiveMessage(request).messages();
+        if (messages.isEmpty()) {
+          sleepQuietly(IDLE_SLEEP_MILLIS);
+          continue;
+        }
         for (Message message : messages) {
           handleMessage(message);
         }
@@ -130,12 +135,9 @@ public class SqsToS3Worker implements CommandLineRunner, DisposableBean {
       output.put("requestId", requestId);
       output.put("payload", payload);
 
-      long delayMillis = ThreadLocalRandom.current().nextLong(180_000, 300_001);
-      logger.info("Processing delay before upload. requestId={}, delayMs={}", requestId, delayMillis);
-      sleepQuietly(delayMillis);
-
       String key = serviceName + "/" + PATH_FORMATTER.format(Instant.now())
           + "/" + requestId + "-" + message.messageId() + ".json";
+      updateStatus(requestId, "PROCESSING");
       PutObjectRequest putRequest = PutObjectRequest.builder()
           .bucket(bucketName)
           .key(key)
@@ -186,6 +188,20 @@ public class SqsToS3Worker implements CommandLineRunner, DisposableBean {
         .expressionAttributeValues(Map.of(
             ":status", AttributeValue.builder().s(status).build(),
             ":outputKey", AttributeValue.builder().s(outputKey).build()))
+        .build();
+    dynamoDbClient.updateItem(request);
+  }
+
+  private void updateStatus(String requestId, String status) {
+    UpdateItemRequest request = UpdateItemRequest.builder()
+        .tableName(tableName)
+        .key(Map.of("requestId", AttributeValue.builder().s(requestId).build()))
+        .updateExpression("SET #engine.#service = :status")
+        .expressionAttributeNames(Map.of(
+            "#engine", "engine",
+            "#service", serviceName))
+        .expressionAttributeValues(Map.of(
+            ":status", AttributeValue.builder().s(status).build()))
         .build();
     dynamoDbClient.updateItem(request);
   }

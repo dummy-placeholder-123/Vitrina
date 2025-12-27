@@ -32,6 +32,8 @@ import software.amazon.awssdk.services.sqs.model.ReceiveMessageRequest;
 @Component
 public class SqsMergeWorker implements CommandLineRunner, DisposableBean {
   private static final Logger logger = LoggerFactory.getLogger(SqsMergeWorker.class);
+  private static final int WAIT_TIME_SECONDS = 20;
+  private static final long IDLE_SLEEP_MILLIS = 40_000;
 
   private final AtomicBoolean running = new AtomicBoolean(true);
   private final SqsClient sqsClient;
@@ -89,12 +91,16 @@ public class SqsMergeWorker implements CommandLineRunner, DisposableBean {
     ReceiveMessageRequest request = ReceiveMessageRequest.builder()
         .queueUrl(queueUrl)
         .maxNumberOfMessages(5)
-        .waitTimeSeconds(20)
+        .waitTimeSeconds(WAIT_TIME_SECONDS)
         .build();
 
     while (running.get()) {
       try {
         List<Message> messages = sqsClient.receiveMessage(request).messages();
+        if (messages.isEmpty()) {
+          sleepQuietly(IDLE_SLEEP_MILLIS);
+          continue;
+        }
         for (Message message : messages) {
           handleMessage(message);
         }

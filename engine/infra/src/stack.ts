@@ -15,13 +15,60 @@ import * as path from 'path';
 
 // S3 object key used by the Lambda deployment workflow.
 const ARTIFACT_KEY = 'lambda/latest.zip';
+const NAME_PREFIX = 'CDK_MADE-Vitrina';
+const LOWER_NAME_PREFIX = 'cdk-made-vitrina';
+
+const resourceNames = (stack: Stack) => {
+  const account = stack.account;
+  const region = stack.region;
+
+  return {
+    lambdaArtifactBucket: `${LOWER_NAME_PREFIX}-${account}-${region}-lambda-artifacts`,
+    serviceAPayloadBucket: `${LOWER_NAME_PREFIX}-${account}-${region}-service-a-payload`,
+    serviceBPayloadBucket: `${LOWER_NAME_PREFIX}-${account}-${region}-service-b-payload`,
+    orchestratedDetectionBucket: `${LOWER_NAME_PREFIX}-${account}-${region}-orchestrated`,
+    serviceARepo: `${LOWER_NAME_PREFIX}-service-a`,
+    serviceBRepo: `${LOWER_NAME_PREFIX}-service-b`,
+    mergeRepo: `${LOWER_NAME_PREFIX}-merge`,
+    pushDlq: `${NAME_PREFIX}-ServiceA-DLQ`,
+    pushQueue: `${NAME_PREFIX}-ServiceA-Queue`,
+    serviceBDlq: `${NAME_PREFIX}-ServiceB-DLQ`,
+    serviceBQueue: `${NAME_PREFIX}-ServiceB-Queue`,
+    mergeDlq: `${NAME_PREFIX}-Merge-DLQ`,
+    mergeQueue: `${NAME_PREFIX}-Merge-Queue`,
+    statusTable: `${NAME_PREFIX}-OrchestrationStatus`,
+    lambdaRole: `${NAME_PREFIX}-Lambda-Role`,
+    lambdaFunction: `${NAME_PREFIX}-PushToSqs`,
+    orchestrationApi: `${NAME_PREFIX}-OrchestrationApi`,
+    vpc: `${NAME_PREFIX}-ServiceVpc`,
+    cluster: `${NAME_PREFIX}-ServiceCluster`,
+    serviceATaskRole: `${NAME_PREFIX}-ServiceA-TaskRole`,
+    serviceBTaskRole: `${NAME_PREFIX}-ServiceB-TaskRole`,
+    mergeTaskRole: `${NAME_PREFIX}-Merge-TaskRole`,
+    serviceAExecutionRole: `${NAME_PREFIX}-ServiceA-ExecutionRole`,
+    serviceBExecutionRole: `${NAME_PREFIX}-ServiceB-ExecutionRole`,
+    mergeExecutionRole: `${NAME_PREFIX}-Merge-ExecutionRole`,
+    serviceALogGroup: `${NAME_PREFIX}-ServiceA-Logs`,
+    serviceBLogGroup: `${NAME_PREFIX}-ServiceB-Logs`,
+    mergeLogGroup: `${NAME_PREFIX}-Merge-Logs`,
+    serviceATaskFamily: `${NAME_PREFIX}-ServiceA-TaskDef`,
+    serviceBTaskFamily: `${NAME_PREFIX}-ServiceB-TaskDef`,
+    mergeTaskFamily: `${NAME_PREFIX}-Merge-TaskDef`,
+    serviceAService: `${NAME_PREFIX}-ServiceA`,
+    serviceBService: `${NAME_PREFIX}-ServiceB`,
+    mergeService: `${NAME_PREFIX}-MergeService`,
+  };
+};
 
 export class VitrinaInfraStack extends Stack {
   constructor(scope: Construct, id: string, props?: StackProps) {
     super(scope, id, props);
 
+    const names = resourceNames(this);
+
     // Bucket stores the Lambda deployment artifact, retained across stack deletes.
     const artifactBucket = new s3.Bucket(this, 'LambdaArtifactBucket', {
+      bucketName: names.lambdaArtifactBucket,
       blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
       encryption: s3.BucketEncryption.S3_MANAGED,
       enforceSSL: true,
@@ -38,6 +85,7 @@ export class VitrinaInfraStack extends Stack {
     });
 
     const serviceAPayloadBucket = new s3.Bucket(this, 'ServiceAPayloadBucket', {
+      bucketName: names.serviceAPayloadBucket,
       blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
       encryption: s3.BucketEncryption.S3_MANAGED,
       enforceSSL: true,
@@ -46,6 +94,7 @@ export class VitrinaInfraStack extends Stack {
     });
 
     const serviceBPayloadBucket = new s3.Bucket(this, 'ServiceBPayloadBucket', {
+      bucketName: names.serviceBPayloadBucket,
       blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
       encryption: s3.BucketEncryption.S3_MANAGED,
       enforceSSL: true,
@@ -54,6 +103,7 @@ export class VitrinaInfraStack extends Stack {
     });
 
     const orchestratedDetectionBucket = new s3.Bucket(this, 'OrchestratedDetectionBucket', {
+      bucketName: names.orchestratedDetectionBucket,
       blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
       encryption: s3.BucketEncryption.S3_MANAGED,
       enforceSSL: true,
@@ -63,12 +113,14 @@ export class VitrinaInfraStack extends Stack {
 
     // DLQ keeps failed messages for inspection during debugging.
     const serviceADlq = new sqs.Queue(this, 'PushDlq', {
+      queueName: names.pushDlq,
       retentionPeriod: Duration.days(14),
       encryption: sqs.QueueEncryption.KMS_MANAGED,
     });
 
     // Main queue for service A.
     const serviceAQueue = new sqs.Queue(this, 'PushQueue', {
+      queueName: names.pushQueue,
       visibilityTimeout: Duration.minutes(7),
       encryption: sqs.QueueEncryption.KMS_MANAGED,
       deadLetterQueue: {
@@ -78,12 +130,14 @@ export class VitrinaInfraStack extends Stack {
     });
 
     const serviceBDlq = new sqs.Queue(this, 'ServiceBDlq', {
+      queueName: names.serviceBDlq,
       retentionPeriod: Duration.days(14),
       encryption: sqs.QueueEncryption.KMS_MANAGED,
     });
 
     // Fan-out queue for service B.
     const serviceBQueue = new sqs.Queue(this, 'ServiceBQueue', {
+      queueName: names.serviceBQueue,
       visibilityTimeout: Duration.minutes(7),
       encryption: sqs.QueueEncryption.KMS_MANAGED,
       deadLetterQueue: {
@@ -93,11 +147,13 @@ export class VitrinaInfraStack extends Stack {
     });
 
     const mergeDlq = new sqs.Queue(this, 'MergeDlq', {
+      queueName: names.mergeDlq,
       retentionPeriod: Duration.days(14),
       encryption: sqs.QueueEncryption.KMS_MANAGED,
     });
 
     const mergeQueue = new sqs.Queue(this, 'MergeQueue', {
+      queueName: names.mergeQueue,
       visibilityTimeout: Duration.minutes(2),
       encryption: sqs.QueueEncryption.KMS_MANAGED,
       deadLetterQueue: {
@@ -107,13 +163,24 @@ export class VitrinaInfraStack extends Stack {
     });
 
     const statusTable = new dynamodb.Table(this, 'OrchestrationStatusTable', {
+      tableName: names.statusTable,
       partitionKey: { name: 'requestId', type: dynamodb.AttributeType.STRING },
       billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
       removalPolicy: RemovalPolicy.RETAIN,
     });
 
+    const lambdaRole = new iam.Role(this, 'LambdaExecutionRole', {
+      roleName: names.lambdaRole,
+      assumedBy: new iam.ServicePrincipal('lambda.amazonaws.com'),
+      managedPolicies: [
+        iam.ManagedPolicy.fromAwsManagedPolicyName('service-role/AWSLambdaBasicExecutionRole'),
+        iam.ManagedPolicy.fromAwsManagedPolicyName('AWSXRayDaemonWriteAccess'),
+      ],
+    });
+
     // Lambda reads code from the artifact bucket and writes logs + traces.
     const fn = new lambda.Function(this, 'PushToSqsFunction', {
+      functionName: names.lambdaFunction,
       runtime: lambda.Runtime.JAVA_17,
       handler: 'com.vitrina.lambda.Handler',
       code: lambda.Code.fromBucket(artifactBucket, ARTIFACT_KEY),
@@ -121,6 +188,7 @@ export class VitrinaInfraStack extends Stack {
       timeout: Duration.seconds(20),
       tracing: lambda.Tracing.ACTIVE,
       logRetention: logs.RetentionDays.ONE_MONTH,
+      role: lambdaRole,
       environment: {
         MAIN_CLASS: 'com.vitrina.lambda.Application',
         SQS_QUEUE_URL_A: serviceAQueue.queueUrl,
@@ -140,6 +208,7 @@ export class VitrinaInfraStack extends Stack {
     orchestratedDetectionBucket.grantRead(fn);
 
     const api = new apigateway.RestApi(this, 'OrchestrationApi', {
+      restApiName: names.orchestrationApi,
       deployOptions: {
         stageName: 'prod',
       },
@@ -158,6 +227,7 @@ export class VitrinaInfraStack extends Stack {
     findingsResource.addResource('{requestId}').addMethod('GET', lambdaIntegration);
 
     const vpc = new ec2.Vpc(this, 'ServiceVpc', {
+      vpcName: names.vpc,
       maxAzs: 2,
       natGateways: 0,
       subnetConfiguration: [
@@ -168,20 +238,54 @@ export class VitrinaInfraStack extends Stack {
       ],
     });
 
-    const cluster = new ecs.Cluster(this, 'ServiceCluster', { vpc });
+    const cluster = new ecs.Cluster(this, 'ServiceCluster', {
+      vpc,
+      clusterName: names.cluster,
+    });
 
-    const serviceARepo = new ecr.Repository(this, 'ServiceARepo');
-    const serviceBRepo = new ecr.Repository(this, 'ServiceBRepo');
-    const mergeServiceRepo = new ecr.Repository(this, 'MergeServiceRepo');
+    const serviceARepo = new ecr.Repository(this, 'ServiceARepo', {
+      repositoryName: names.serviceARepo,
+    });
+    const serviceBRepo = new ecr.Repository(this, 'ServiceBRepo', {
+      repositoryName: names.serviceBRepo,
+    });
+    const mergeServiceRepo = new ecr.Repository(this, 'MergeServiceRepo', {
+      repositoryName: names.mergeRepo,
+    });
 
     const serviceATaskRole = new iam.Role(this, 'ServiceATaskRole', {
+      roleName: names.serviceATaskRole,
       assumedBy: new iam.ServicePrincipal('ecs-tasks.amazonaws.com'),
     });
     const serviceBTaskRole = new iam.Role(this, 'ServiceBTaskRole', {
+      roleName: names.serviceBTaskRole,
       assumedBy: new iam.ServicePrincipal('ecs-tasks.amazonaws.com'),
     });
     const mergeTaskRole = new iam.Role(this, 'MergeTaskRole', {
+      roleName: names.mergeTaskRole,
       assumedBy: new iam.ServicePrincipal('ecs-tasks.amazonaws.com'),
+    });
+
+    const serviceAExecutionRole = new iam.Role(this, 'ServiceAExecutionRole', {
+      roleName: names.serviceAExecutionRole,
+      assumedBy: new iam.ServicePrincipal('ecs-tasks.amazonaws.com'),
+      managedPolicies: [
+        iam.ManagedPolicy.fromAwsManagedPolicyName('service-role/AmazonECSTaskExecutionRolePolicy'),
+      ],
+    });
+    const serviceBExecutionRole = new iam.Role(this, 'ServiceBExecutionRole', {
+      roleName: names.serviceBExecutionRole,
+      assumedBy: new iam.ServicePrincipal('ecs-tasks.amazonaws.com'),
+      managedPolicies: [
+        iam.ManagedPolicy.fromAwsManagedPolicyName('service-role/AmazonECSTaskExecutionRolePolicy'),
+      ],
+    });
+    const mergeExecutionRole = new iam.Role(this, 'MergeExecutionRole', {
+      roleName: names.mergeExecutionRole,
+      assumedBy: new iam.ServicePrincipal('ecs-tasks.amazonaws.com'),
+      managedPolicies: [
+        iam.ManagedPolicy.fromAwsManagedPolicyName('service-role/AmazonECSTaskExecutionRolePolicy'),
+      ],
     });
 
     serviceAQueue.grantConsumeMessages(serviceATaskRole);
@@ -199,29 +303,38 @@ export class VitrinaInfraStack extends Stack {
     statusTable.grantReadWriteData(mergeTaskRole);
 
     const serviceALogGroup = new logs.LogGroup(this, 'ServiceALogGroup', {
+      logGroupName: names.serviceALogGroup,
       retention: logs.RetentionDays.ONE_MONTH,
     });
     const serviceBLogGroup = new logs.LogGroup(this, 'ServiceBLogGroup', {
+      logGroupName: names.serviceBLogGroup,
       retention: logs.RetentionDays.ONE_MONTH,
     });
     const mergeLogGroup = new logs.LogGroup(this, 'MergeLogGroup', {
+      logGroupName: names.mergeLogGroup,
       retention: logs.RetentionDays.ONE_MONTH,
     });
 
     const serviceATaskDef = new ecs.FargateTaskDefinition(this, 'ServiceATaskDef', {
+      family: names.serviceATaskFamily,
       cpu: 256,
       memoryLimitMiB: 512,
       taskRole: serviceATaskRole,
+      executionRole: serviceAExecutionRole,
     });
     const serviceBTaskDef = new ecs.FargateTaskDefinition(this, 'ServiceBTaskDef', {
+      family: names.serviceBTaskFamily,
       cpu: 512,
       memoryLimitMiB: 1024,
       taskRole: serviceBTaskRole,
+      executionRole: serviceBExecutionRole,
     });
     const mergeTaskDef = new ecs.FargateTaskDefinition(this, 'MergeTaskDef', {
+      family: names.mergeTaskFamily,
       cpu: 256,
       memoryLimitMiB: 512,
       taskRole: mergeTaskRole,
+      executionRole: mergeExecutionRole,
     });
 
     serviceATaskDef.addContainer('ServiceAContainer', {
@@ -277,6 +390,7 @@ export class VitrinaInfraStack extends Stack {
       desiredCount: 0,
       assignPublicIp: true,
       vpcSubnets: { subnetType: ec2.SubnetType.PUBLIC },
+      serviceName: names.serviceAService,
     });
 
     const serviceB = new ecs.FargateService(this, 'ServiceB', {
@@ -285,6 +399,7 @@ export class VitrinaInfraStack extends Stack {
       desiredCount: 0,
       assignPublicIp: true,
       vpcSubnets: { subnetType: ec2.SubnetType.PUBLIC },
+      serviceName: names.serviceBService,
     });
 
     const mergeService = new ecs.FargateService(this, 'MergeService', {
@@ -293,6 +408,7 @@ export class VitrinaInfraStack extends Stack {
       desiredCount: 0,
       assignPublicIp: true,
       vpcSubnets: { subnetType: ec2.SubnetType.PUBLIC },
+      serviceName: names.mergeService,
     });
 
     // Outputs are used by the Lambda deployment workflow.
